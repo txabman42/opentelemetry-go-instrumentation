@@ -6,28 +6,6 @@
   "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
-      "matchManagers": ["gomod"],
-      "matchDepTypes": ["indirect"],
-      "enabled": true
-    },
-    {
-      "matchManagers": ["gomod"],
-      "matchPackageNames": ["go.opentelemetry.io/auto/examples/rolldice/user"],
-      "enabled": false
-    },
-    {
-      "matchPackageNames": ["go.opentelemetry.io/build-tools/**"],
-      "groupName": "build-tools"
-    },
-    {
-      "matchPackageNames": ["google.golang.org/genproto/googleapis/**"],
-      "groupName": "googleapis"
-    },
-    {
-      "matchPackageNames": ["golang.org/x/**"],
-      "groupName": "golang.org/x"
-    },
-    {
       "matchManagers": ["regex"],
       "matchPackagePatterns": ["otel/opentelemetry-collector-contrib"],
       "groupName": "otel-collector"
