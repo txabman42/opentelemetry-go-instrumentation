@@ -35,7 +35,7 @@
   ],
   "regexManagers": [
     {
-      "fileMatch": [".github/workflows/e2e/k8s/collector.yml"],
+      "fileMatch": [".github/workflows/e2e/k8s/.*\\.ya?ml"],
       "matchStrings": [
         "repository:\\s*(?<depName>otel/opentelemetry-collector-contrib)\\s*tag:\\s*\"?(?<currentValue>[^\"]+)\"?"
       ],
