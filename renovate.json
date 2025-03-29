@@ -1,15 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:best-practices"
-  ],
-  "ignorePaths": [
-    "**/LICENSES/**"
-  ],
+  "extends": ["config:best-practices"],
+  "ignorePaths": ["**/LICENSES/**"],
   "labels": ["Skip Changelog", "dependencies"],
-  "postUpdateOptions" : [
-    "gomodTidy"
-  ],
+  "postUpdateOptions": ["gomodTidy"],
   "packageRules": [
     {
       "matchManagers": ["gomod"],
@@ -32,6 +26,20 @@
     {
       "matchPackageNames": ["golang.org/x/**"],
       "groupName": "golang.org/x"
+    },
+    {
+      "matchManagers": ["regex"],
+      "matchPackagePatterns": ["otel/opentelemetry-collector-contrib"],
+      "groupName": "otel-collector"
+    }
+  ],
+  "regexManagers": [
+    {
+      "fileMatch": [".github/workflows/e2e/k8s/collector.yml"],
+      "matchStrings": [
+        "repository:\\s*(?<depName>otel/opentelemetry-collector-contrib)\\s*tag:\\s*\"?(?<currentValue>[^\"]+)\"?"
+      ],
+      "datasourceTemplate": "docker"
     }
   ]
 }
