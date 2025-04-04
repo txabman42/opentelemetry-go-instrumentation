@@ -31,30 +31,35 @@ jobs:
     strategy:
       matrix:
         runner: [ubuntu-latest, ubuntu-22.04-arm]
-        library: ["autosdk", "nethttp", "nethttp_custom", "gin", "databasesql", "grpc", "otelglobal", "kafka-go"]
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout Repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
-      - name: Build sample app from script
-        if: ${{ hashFiles(format('internal/test/e2e/{0}/build.sh', matrix.library)) != '' }}
+      - name: Build all sample apps
         run: |
-          # First build with the standard name for script compatibility
-          ./internal/test/e2e/${{ matrix.library }}/build.sh -t sample-app:latest
-          # Then tag with the matrix-specific name for artifact storage
-          docker tag sample-app:latest sample-app-${{ matrix.library }}:latest
-      - name: Build sample app
-        if: ${{ hashFiles(format('internal/test/e2e/{0}/build.sh', matrix.library)) == '' }}
-        working-directory: ./internal/test/e2e/${{ matrix.library }}
-        run: docker build -t sample-app-${{ matrix.library }}:latest .
-      - name: Save Docker image
-        run: |
-          docker save sample-app-${{ matrix.library }}:latest -o sample-app-${{ matrix.library }}-${{ matrix.runner }}.tar
-      - name: Upload Docker image artifact
+          LIBRARIES=("autosdk" "nethttp" "nethttp_custom" "gin" "databasesql" "grpc" "otelglobal" "kafka-go")
+          
+          for library in "${LIBRARIES[@]}"; do
+            echo "Building sample app for $library..."
+            
+            if [ -f "./internal/test/e2e/$library/build.sh" ]; then
+              echo ">>> Building $library sample app using build.sh script <<<"
+              ./internal/test/e2e/$library/build.sh -t sample-app:latest
+              docker tag sample-app:latest sample-app-$library:latest
+            else
+              echo ">>> Building $library sample app directly with Dockerfile <<<"
+              docker build -t sample-app-$library:latest ./internal/test/e2e/$library
+            fi
+            
+            # Save Docker image
+            docker save sample-app-$library:latest -o sample-app-$library-${{ matrix.runner }}.tar
+          done
+      
+      - name: Upload all Docker image artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: sample-app-${{ matrix.library }}-${{ matrix.runner }}
-          path: sample-app-${{ matrix.library }}-${{ matrix.runner }}.tar
+          name: sample-apps-${{ matrix.runner }}
+          path: sample-app-*-${{ matrix.runner }}.tar
 
   kubernetes-test:
     needs:
@@ -90,13 +95,14 @@ jobs:
       - name: Download sample app Docker image artifact
         uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e # v4
         with:
-          name: sample-app-${{ matrix.library }}-${{ matrix.runner }}
+          name: sample-apps-${{ matrix.runner }}
+          path: ./sample-apps
       - name: Load auto-instrumentation Docker image
         run: |
           docker load -i otel-go-instrumentation-${{ matrix.runner }}.tar
       - name: Load sample app Docker image
         run: |
-          docker load -i sample-app-${{ matrix.library }}-${{ matrix.runner }}.tar
+          docker load -i ./sample-apps/sample-app-${{ matrix.library }}-${{ matrix.runner }}.tar
           docker tag sample-app-${{ matrix.library }}:latest sample-app:latest
       - name: Kind load images
         run: |
