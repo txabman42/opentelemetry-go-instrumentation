@@ -6,6 +6,7 @@ package server
 
 import (
 	"log/slog"
+	"os"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -27,8 +28,22 @@ import (
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -target amd64,arm64 bpf ./bpf/probe.bpf.c
 
-// pkg is the package being instrumented.
-const pkg = "net/http"
+const (
+	// pkg is the package being instrumented.
+	pkg = "net/http"
+
+	// (e.g., "content-type,user-agent").
+	CaptureRequestHeadersEnvVar = "OTEL_GO_AUTO_CAPTURE_REQUEST_HEADERS"
+
+	// (e.g., "content-type,content-length").
+	CaptureResponseHeadersEnvVar = "OTEL_GO_AUTO_CAPTURE_RESPONSE_HEADERS"
+
+	// maxHeadersPerType is the maximum number of headers we can capture per type (request/response).
+	maxHeadersPerType = 2
+
+	// maxHeaderNameLength is the maximum length of a header name.
+	maxHeaderNameLength = 32
+)
 
 var (
 	goMapsVersion = semver.New(1, 24, 0, "", "")
@@ -121,6 +136,9 @@ func New(logger *slog.Logger, version string) probe.Probe {
 				},
 				patternPathSupportedConst{},
 				swissMapsUsedConst{},
+				headersConst{
+					Logger: logger,
+				},
 			},
 			Uprobes: []*probe.Uprobe{
 				{
@@ -164,6 +182,80 @@ func (c swissMapsUsedConst) InjectOption(info *process.Info) (inject.Option, err
 	return inject.WithKeyValue("swiss_maps_used", isUsingGoSwissMaps), nil
 }
 
+// Headers2Capture holds the configuration for HTTP headers to be captured.
+type Headers2Capture struct {
+	RequestHeaders      [2][32]int8
+	RequestHeaderCount  uint32
+	ResponseHeaders     [2][32]int8
+	ResponseHeaderCount uint32
+}
+
+type headersConst struct {
+	Logger *slog.Logger
+}
+
+func (c headersConst) InjectOption(_ *process.Info) (inject.Option, error) {
+	reqHeaders := parseHeadersList(os.Getenv(CaptureRequestHeadersEnvVar), c.Logger)
+	reqHeaderCount := min(len(reqHeaders), maxHeadersPerType)
+
+	respHeaders := parseHeadersList(os.Getenv(CaptureResponseHeadersEnvVar), c.Logger)
+	respHeaderCount := min(len(respHeaders), maxHeadersPerType)
+
+	headersConfig := Headers2Capture{
+		RequestHeaderCount:  uint32(reqHeaderCount),
+		ResponseHeaderCount: uint32(respHeaderCount),
+	}
+
+	// Copy request headers to fixed-size array
+	for i := 0; i < reqHeaderCount; i++ {
+		copyStringToInt8Array(reqHeaders[i], headersConfig.RequestHeaders[i][:])
+	}
+
+	// Copy response headers to fixed-size array
+	for i := 0; i < respHeaderCount; i++ {
+		copyStringToInt8Array(respHeaders[i], headersConfig.ResponseHeaders[i][:])
+	}
+
+	return inject.WithKeyValue("headers_config", headersConfig), nil
+}
+
+// copyStringToInt8Array copies a string to an int8 array.
+func copyStringToInt8Array(src string, dest []int8) {
+	for i := 0; i < len(src) && i < len(dest); i++ {
+		dest[i] = int8(src[i])
+	}
+}
+
+// parseHeadersList parses a comma-separated list of headers and returns a slice of normalized header names.
+func parseHeadersList(headersList string, logger *slog.Logger) []string {
+	if headersList == "" {
+		return nil
+	}
+
+	var result []string
+	headers := strings.Split(headersList, ",")
+	for _, h := range headers {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if len(h) > maxHeaderNameLength {
+			logger.Warn("Skipping header with name exceeding maximum length",
+				"header", h,
+				"max_length", maxHeaderNameLength)
+			continue
+		}
+		result = append(result, strings.ToLower(h))
+	}
+
+	return result
+}
+
+type headerAttributes struct {
+	Key   [32]byte
+	Value [32]byte
+}
+
 // event represents an event in an HTTP server during an HTTP
 // request-response.
 type event struct {
@@ -175,6 +267,7 @@ type event struct {
 	RemoteAddr  [256]byte
 	Host        [256]byte
 	Proto       [8]byte
+	Headers     [2]headerAttributes
 }
 
 func processFn(e *event) ptrace.SpanSlice {
@@ -228,6 +321,22 @@ func processFn(e *event) ptrace.SpanSlice {
 				attrs = append(attrs, semconv.NetworkProtocolName(parts[0]))
 			}
 			attrs = append(attrs, semconv.NetworkProtocolVersion(parts[1]))
+		}
+	}
+
+	for _, header := range e.Headers {
+		key := unix.ByteSliceToString(header.Key[:])
+		if key == "" {
+			continue
+		}
+		value := unix.ByteSliceToString(header.Value[:])
+		if strings.HasPrefix(key, "request_") {
+			headerName := strings.TrimPrefix(key, "request_")
+			// https://opentelemetry.io/docs/specs/semconv/attributes-registry/http/#http-request-header
+			attrs = append(attrs, attribute.Key("http.request.header."+headerName).String(value))
+		} else if strings.HasPrefix(key, "response_") {
+			headerName := strings.TrimPrefix(key, "response_")
+			attrs = append(attrs, attribute.Key("http.response.header."+headerName).String(value))
 		}
 	}
 

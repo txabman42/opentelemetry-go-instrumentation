@@ -12,6 +12,13 @@ import (
 	"github.com/cilium/ebpf"
 )
 
+type bpfHeadersConfig struct {
+	RequestHeaders      [2][32]int8
+	RequestHeaderCount  uint32
+	ResponseHeaders     [2][32]int8
+	ResponseHeaderCount uint32
+}
+
 type bpfSliceArrayBuff struct{ Buff [1024]uint8 }
 
 type bpfSpanContext struct {
@@ -34,6 +41,10 @@ type bpfUprobeDataT struct {
 		RemoteAddr  [256]int8
 		Host        [256]int8
 		Proto       [8]int8
+		Headers     [2]struct {
+			Key   [32]int8
+			Value [32]int8
+		}
 	}
 	RespPtr uint64
 }
@@ -109,6 +120,7 @@ type bpfVariableSpecs struct {
 	BucketsPtrPos        *ebpf.VariableSpec `ebpf:"buckets_ptr_pos"`
 	CtxPtrPos            *ebpf.VariableSpec `ebpf:"ctx_ptr_pos"`
 	EndAddr              *ebpf.VariableSpec `ebpf:"end_addr"`
+	HeadersConfig        *ebpf.VariableSpec `ebpf:"headers_config"`
 	HeadersPtrPos        *ebpf.VariableSpec `ebpf:"headers_ptr_pos"`
 	Hex                  *ebpf.VariableSpec `ebpf:"hex"`
 	HostPos              *ebpf.VariableSpec `ebpf:"host_pos"`
@@ -183,6 +195,7 @@ type bpfVariables struct {
 	BucketsPtrPos        *ebpf.Variable `ebpf:"buckets_ptr_pos"`
 	CtxPtrPos            *ebpf.Variable `ebpf:"ctx_ptr_pos"`
 	EndAddr              *ebpf.Variable `ebpf:"end_addr"`
+	HeadersConfig        *ebpf.Variable `ebpf:"headers_config"`
 	HeadersPtrPos        *ebpf.Variable `ebpf:"headers_ptr_pos"`
 	Hex                  *ebpf.Variable `ebpf:"hex"`
 	HostPos              *ebpf.Variable `ebpf:"host_pos"`
