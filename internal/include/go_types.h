@@ -65,6 +65,133 @@ static __always_inline void* get_go_interface_instance(void *iface)
     return (void*)(iface + 8);
 }
 
+// Structure to hold the result of finding a key in a map
+struct map_key_find_result {
+    bool found;                      // Whether the key was found
+    u32 bucket_index;                // Bucket index where the key was found
+    u32 entry_index;                 // Entry index within the bucket
+    void *key_ptr;                   // Pointer to the key
+    void *value_ptr;                 // Pointer to the value
+};
+
+// Define the map bucket structure for go_string_t keys and go_slice_t values
+MAP_BUCKET_DEFINITION(go_string_t, go_slice_t)
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(key_size, sizeof(u32));
+    __uint(value_size, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)));
+    __uint(max_entries, 1);
+} golang_mapbucket_storage_map SEC(".maps");
+
+// Generic function to search for a key in a Go map
+// Parameters:
+//   map_ptr: pointer to the go map
+//   key_to_find: string to search for
+//   key_length: length of the key to find
+//   buckets_ptr_pos: offset to the buckets pointer from map_ptr
+//   result: pointer to a map_key_find_result structure to store the result
+// Returns:
+//   0 on success, negative value on error
+static __always_inline long find_key_in_go_map(void *map_ptr, const char *key_to_find, u32 key_length, 
+                                        u64 buckets_ptr_pos, struct map_key_find_result *result)
+{
+    long res;
+    if (!map_ptr || !result) {
+        return -1;
+    }
+
+    // Initialize result
+    result->found = false;
+    result->bucket_index = 0;
+    result->entry_index = 0;
+    result->key_ptr = NULL;
+    result->value_ptr = NULL;
+
+    // Read map count and bucket count
+    u64 headers_count = 0;
+    res = bpf_probe_read(&headers_count, sizeof(headers_count), map_ptr);
+    if (res < 0 || headers_count == 0) {
+        return -2;
+    }
+
+    unsigned char log_2_bucket_count;
+    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), map_ptr + 9);
+    if (res < 0) {
+        return -3;
+    }
+
+    u64 bucket_count = 1 << log_2_bucket_count;
+    void *header_buckets;
+    res = bpf_probe_read(&header_buckets, sizeof(header_buckets), (void*)(map_ptr + buckets_ptr_pos));
+    if (res < 0 || header_buckets == NULL) {
+        return -4;
+    }
+
+    // Get temporary storage for the bucket
+    u32 map_id = 0;
+    MAP_BUCKET_TYPE(go_string_t, go_slice_t) *map_value = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
+    if (!map_value) {
+        return -5;
+    }
+
+    // Iterate over buckets
+    #pragma unroll
+    // for (u64 bucket_idx = 0; bucket_idx < 8 && bucket_idx < bucket_count; bucket_idx++) {
+    for (u64 bucket_idx = 0; bucket_idx < 8 && bucket_idx < bucket_count; bucket_idx++) {
+        res = bpf_probe_read(map_value, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)), 
+                          header_buckets + (bucket_idx * sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t))));
+        if (res < 0) {
+            continue;
+        }
+
+        // Iterate over entries in the bucket
+        #pragma unroll
+        for (u64 entry_idx = 0; entry_idx < 3; entry_idx++) {
+            // Skip empty entries
+            if (map_value->tophash[entry_idx] == 0) {
+                bpf_printk("XMB999: Skip empty entries - tophash[%d] = 0", entry_idx);
+                continue;
+            }
+            
+            // Check if this key matches
+            if (map_value->keys[entry_idx].len != key_length) {
+                // char key_buffer[64] = {0};
+                // if (map_value->keys[entry_idx].str != NULL && map_value->keys[entry_idx].len > 0) {
+                //     u32 key_read_len = map_value->keys[entry_idx].len < 63 ? map_value->keys[entry_idx].len : 63;
+                //     bpf_probe_read(key_buffer, key_read_len, map_value->keys[entry_idx].str);
+                // }
+                // bpf_printk("XMB999: Skip empty entries - key length mismatch, key=%s (key_length=%d, entry_idx=%d)", key_buffer, key_length, entry_idx);
+                continue;
+            }
+            
+            char current_key[32] = {0};  // Buffer to hold the key content
+            u32 read_len = key_length < 32 ? key_length : 32;
+            
+            res = bpf_probe_read(current_key, read_len, map_value->keys[entry_idx].str);
+            if (res < 0) {
+                bpf_printk("XMB999: Skip empty entries - read error");
+                continue;
+            }
+
+            // Print the current key for debugging
+            bpf_printk("Current key: %s", current_key);
+            if (bpf_memicmp(current_key, key_to_find, read_len) == 0) {
+                // Key found
+                result->found = true;
+                result->bucket_index = bucket_idx;
+                result->entry_index = entry_idx;
+                result->key_ptr = &map_value->keys[entry_idx];
+                result->value_ptr = &map_value->values[entry_idx];
+                return 0;
+            }
+        }
+    }
+    
+    return -6;  // Key not found
+}
+
 static __always_inline struct go_string write_user_go_string(char *str, u32 len)
 {
     // Copy chars to userspace

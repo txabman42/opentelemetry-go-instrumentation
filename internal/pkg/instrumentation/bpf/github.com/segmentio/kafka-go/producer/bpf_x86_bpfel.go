@@ -84,15 +84,16 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	AllocMap               *ebpf.MapSpec `ebpf:"alloc_map"`
-	Events                 *ebpf.MapSpec `ebpf:"events"`
-	GoContextToSc          *ebpf.MapSpec `ebpf:"go_context_to_sc"`
-	KafkaEvents            *ebpf.MapSpec `ebpf:"kafka_events"`
-	KafkaRequestStorageMap *ebpf.MapSpec `ebpf:"kafka_request_storage_map"`
-	ProbeActiveSamplerMap  *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
-	SamplersConfigMap      *ebpf.MapSpec `ebpf:"samplers_config_map"`
-	SliceArrayBuffMap      *ebpf.MapSpec `ebpf:"slice_array_buff_map"`
-	TrackedSpansBySc       *ebpf.MapSpec `ebpf:"tracked_spans_by_sc"`
+	AllocMap                  *ebpf.MapSpec `ebpf:"alloc_map"`
+	Events                    *ebpf.MapSpec `ebpf:"events"`
+	GoContextToSc             *ebpf.MapSpec `ebpf:"go_context_to_sc"`
+	GolangMapbucketStorageMap *ebpf.MapSpec `ebpf:"golang_mapbucket_storage_map"`
+	KafkaEvents               *ebpf.MapSpec `ebpf:"kafka_events"`
+	KafkaRequestStorageMap    *ebpf.MapSpec `ebpf:"kafka_request_storage_map"`
+	ProbeActiveSamplerMap     *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
+	SamplersConfigMap         *ebpf.MapSpec `ebpf:"samplers_config_map"`
+	SliceArrayBuffMap         *ebpf.MapSpec `ebpf:"slice_array_buff_map"`
+	TrackedSpansBySc          *ebpf.MapSpec `ebpf:"tracked_spans_by_sc"`
 }
 
 // bpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -130,15 +131,16 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	AllocMap               *ebpf.Map `ebpf:"alloc_map"`
-	Events                 *ebpf.Map `ebpf:"events"`
-	GoContextToSc          *ebpf.Map `ebpf:"go_context_to_sc"`
-	KafkaEvents            *ebpf.Map `ebpf:"kafka_events"`
-	KafkaRequestStorageMap *ebpf.Map `ebpf:"kafka_request_storage_map"`
-	ProbeActiveSamplerMap  *ebpf.Map `ebpf:"probe_active_sampler_map"`
-	SamplersConfigMap      *ebpf.Map `ebpf:"samplers_config_map"`
-	SliceArrayBuffMap      *ebpf.Map `ebpf:"slice_array_buff_map"`
-	TrackedSpansBySc       *ebpf.Map `ebpf:"tracked_spans_by_sc"`
+	AllocMap                  *ebpf.Map `ebpf:"alloc_map"`
+	Events                    *ebpf.Map `ebpf:"events"`
+	GoContextToSc             *ebpf.Map `ebpf:"go_context_to_sc"`
+	GolangMapbucketStorageMap *ebpf.Map `ebpf:"golang_mapbucket_storage_map"`
+	KafkaEvents               *ebpf.Map `ebpf:"kafka_events"`
+	KafkaRequestStorageMap    *ebpf.Map `ebpf:"kafka_request_storage_map"`
+	ProbeActiveSamplerMap     *ebpf.Map `ebpf:"probe_active_sampler_map"`
+	SamplersConfigMap         *ebpf.Map `ebpf:"samplers_config_map"`
+	SliceArrayBuffMap         *ebpf.Map `ebpf:"slice_array_buff_map"`
+	TrackedSpansBySc          *ebpf.Map `ebpf:"tracked_spans_by_sc"`
 }
 
 func (m *bpfMaps) Close() error {
@@ -146,6 +148,7 @@ func (m *bpfMaps) Close() error {
 		m.AllocMap,
 		m.Events,
 		m.GoContextToSc,
+		m.GolangMapbucketStorageMap,
 		m.KafkaEvents,
 		m.KafkaRequestStorageMap,
 		m.ProbeActiveSamplerMap,

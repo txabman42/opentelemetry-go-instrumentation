@@ -109,20 +109,21 @@ type bpfProgramSpecs struct {
 //
 // It can be passed ebpf.CollectionSpec.Assign.
 type bpfMapSpecs struct {
-	ActiveSpansBySpanPtr      *ebpf.MapSpec `ebpf:"active_spans_by_span_ptr"`
-	AllocMap                  *ebpf.MapSpec `ebpf:"alloc_map"`
-	Events                    *ebpf.MapSpec `ebpf:"events"`
-	GoContextToSc             *ebpf.MapSpec `ebpf:"go_context_to_sc"`
-	GolangMapbucketStorageMap *ebpf.MapSpec `ebpf:"golang_mapbucket_storage_map"`
-	OtelSpanStorageMap        *ebpf.MapSpec `ebpf:"otel_span_storage_map"`
-	ProbeActiveSamplerMap     *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
-	SamplersConfigMap         *ebpf.MapSpec `ebpf:"samplers_config_map"`
-	SliceArrayBuffMap         *ebpf.MapSpec `ebpf:"slice_array_buff_map"`
-	SpanNameByContext         *ebpf.MapSpec `ebpf:"span_name_by_context"`
-	TracerIdByContext         *ebpf.MapSpec `ebpf:"tracer_id_by_context"`
-	TracerIdStorageMap        *ebpf.MapSpec `ebpf:"tracer_id_storage_map"`
-	TracerPtrToIdMap          *ebpf.MapSpec `ebpf:"tracer_ptr_to_id_map"`
-	TrackedSpansBySc          *ebpf.MapSpec `ebpf:"tracked_spans_by_sc"`
+	ActiveSpansBySpanPtr           *ebpf.MapSpec `ebpf:"active_spans_by_span_ptr"`
+	AllocMap                       *ebpf.MapSpec `ebpf:"alloc_map"`
+	Events                         *ebpf.MapSpec `ebpf:"events"`
+	GoContextToSc                  *ebpf.MapSpec `ebpf:"go_context_to_sc"`
+	GolangMapbucketStorageMap      *ebpf.MapSpec `ebpf:"golang_mapbucket_storage_map"`
+	OtelSpanStorageMap             *ebpf.MapSpec `ebpf:"otel_span_storage_map"`
+	ProbeActiveSamplerMap          *ebpf.MapSpec `ebpf:"probe_active_sampler_map"`
+	SamplersConfigMap              *ebpf.MapSpec `ebpf:"samplers_config_map"`
+	SliceArrayBuffMap              *ebpf.MapSpec `ebpf:"slice_array_buff_map"`
+	SpanNameByContext              *ebpf.MapSpec `ebpf:"span_name_by_context"`
+	TraceglobalMapbucketStorageMap *ebpf.MapSpec `ebpf:"traceglobal_mapbucket_storage_map"`
+	TracerIdByContext              *ebpf.MapSpec `ebpf:"tracer_id_by_context"`
+	TracerIdStorageMap             *ebpf.MapSpec `ebpf:"tracer_id_storage_map"`
+	TracerPtrToIdMap               *ebpf.MapSpec `ebpf:"tracer_ptr_to_id_map"`
+	TrackedSpansBySc               *ebpf.MapSpec `ebpf:"tracked_spans_by_sc"`
 }
 
 // bpfVariableSpecs contains global variables before they are loaded into the kernel.
@@ -172,20 +173,21 @@ func (o *bpfObjects) Close() error {
 //
 // It can be passed to loadBpfObjects or ebpf.CollectionSpec.LoadAndAssign.
 type bpfMaps struct {
-	ActiveSpansBySpanPtr      *ebpf.Map `ebpf:"active_spans_by_span_ptr"`
-	AllocMap                  *ebpf.Map `ebpf:"alloc_map"`
-	Events                    *ebpf.Map `ebpf:"events"`
-	GoContextToSc             *ebpf.Map `ebpf:"go_context_to_sc"`
-	GolangMapbucketStorageMap *ebpf.Map `ebpf:"golang_mapbucket_storage_map"`
-	OtelSpanStorageMap        *ebpf.Map `ebpf:"otel_span_storage_map"`
-	ProbeActiveSamplerMap     *ebpf.Map `ebpf:"probe_active_sampler_map"`
-	SamplersConfigMap         *ebpf.Map `ebpf:"samplers_config_map"`
-	SliceArrayBuffMap         *ebpf.Map `ebpf:"slice_array_buff_map"`
-	SpanNameByContext         *ebpf.Map `ebpf:"span_name_by_context"`
-	TracerIdByContext         *ebpf.Map `ebpf:"tracer_id_by_context"`
-	TracerIdStorageMap        *ebpf.Map `ebpf:"tracer_id_storage_map"`
-	TracerPtrToIdMap          *ebpf.Map `ebpf:"tracer_ptr_to_id_map"`
-	TrackedSpansBySc          *ebpf.Map `ebpf:"tracked_spans_by_sc"`
+	ActiveSpansBySpanPtr           *ebpf.Map `ebpf:"active_spans_by_span_ptr"`
+	AllocMap                       *ebpf.Map `ebpf:"alloc_map"`
+	Events                         *ebpf.Map `ebpf:"events"`
+	GoContextToSc                  *ebpf.Map `ebpf:"go_context_to_sc"`
+	GolangMapbucketStorageMap      *ebpf.Map `ebpf:"golang_mapbucket_storage_map"`
+	OtelSpanStorageMap             *ebpf.Map `ebpf:"otel_span_storage_map"`
+	ProbeActiveSamplerMap          *ebpf.Map `ebpf:"probe_active_sampler_map"`
+	SamplersConfigMap              *ebpf.Map `ebpf:"samplers_config_map"`
+	SliceArrayBuffMap              *ebpf.Map `ebpf:"slice_array_buff_map"`
+	SpanNameByContext              *ebpf.Map `ebpf:"span_name_by_context"`
+	TraceglobalMapbucketStorageMap *ebpf.Map `ebpf:"traceglobal_mapbucket_storage_map"`
+	TracerIdByContext              *ebpf.Map `ebpf:"tracer_id_by_context"`
+	TracerIdStorageMap             *ebpf.Map `ebpf:"tracer_id_storage_map"`
+	TracerPtrToIdMap               *ebpf.Map `ebpf:"tracer_ptr_to_id_map"`
+	TrackedSpansBySc               *ebpf.Map `ebpf:"tracked_spans_by_sc"`
 }
 
 func (m *bpfMaps) Close() error {
@@ -200,6 +202,7 @@ func (m *bpfMaps) Close() error {
 		m.SamplersConfigMap,
 		m.SliceArrayBuffMap,
 		m.SpanNameByContext,
+		m.TraceglobalMapbucketStorageMap,
 		m.TracerIdByContext,
 		m.TracerIdStorageMap,
 		m.TracerPtrToIdMap,

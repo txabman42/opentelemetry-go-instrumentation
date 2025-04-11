@@ -1,6 +1,7 @@
 // Copyright The OpenTelemetry Authors
 // SPDX-License-Identifier: Apache-2.0
 
+#include "common.h"
 #include "arguments.h"
 #include "trace/span_context.h"
 #include "go_context.h"
@@ -50,8 +51,6 @@ struct uprobe_data_t
     u64 resp_ptr;
 };
 
-MAP_BUCKET_DEFINITION(go_string_t, go_slice_t)
-
 struct
 {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -67,14 +66,6 @@ struct
     __type(value, struct span_context);
     __uint(max_entries, MAX_CONCURRENT);
 } http_server_context_headers SEC(".maps");
-
-struct
-{
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(key_size, sizeof(u32));
-    __uint(value_size, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)));
-    __uint(max_entries, 1);
-} golang_mapbucket_storage_map SEC(".maps");
 
 struct
 {
@@ -114,99 +105,11 @@ struct headers_config {
 };
 volatile const struct headers_config headers_config;
 
-// Helper function to iterate through Go maps
-static __always_inline long iterate_go_map(void *headers_ptr, void (*process_entry)(MAP_BUCKET_TYPE(go_string_t, go_slice_t) *, u64, void *), void *data) {
-    long res;
-    if (!headers_ptr) {
-        return -1;
-    }
-
-    u64 headers_count = 0;
-    res = bpf_probe_read(&headers_count, sizeof(headers_count), headers_ptr);
-    if (res < 0 || headers_count == 0) {
-        return -1;
-    }
-
-    unsigned char log_2_bucket_count;
-    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), headers_ptr + 9);
-    if (res < 0) {
-        return -1;
-    }
-
-    u64 bucket_count = 1 << log_2_bucket_count;
-    void *header_buckets;
-    res = bpf_probe_read(&header_buckets, sizeof(header_buckets), (void*)(headers_ptr + buckets_ptr_pos));
-    if (res < 0) {
-        return -1;
-    }
-
-    u32 map_id = 0;
-    MAP_BUCKET_TYPE(go_string_t, go_slice_t) *map_value = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
-    if (!map_value) {
-        return -1;
-    }
-
-    for (u64 j = 0; j < MAX_BUCKETS && j < bucket_count; j++) {
-        res = bpf_probe_read(map_value, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)), 
-                          header_buckets + (j * sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t))));
-        if (res < 0) {
-            continue;
-        }
-        
-        for (u64 i = 0; i < 8; i++) {
-            if (map_value->tophash[i] == 0) {
-                continue;
-            }
-            
-            process_entry(map_value, i, data);
-        }
-    }
-    
-    return 0;
-}
-
 // Data structure for traceparent header extraction
 struct traceparent_extraction_data {
     struct span_context *parent_span_context;
     bool found;
 };
-
-// Process function for traceparent extraction
-static __always_inline void process_traceparent_entry(MAP_BUCKET_TYPE(go_string_t, go_slice_t) *map_value, u64 i, void *data) {
-    struct traceparent_extraction_data *extraction_data = (struct traceparent_extraction_data *)data;
-    long res;
-    
-    if (map_value->keys[i].len != W3C_KEY_LENGTH) {
-        return;
-    }
-    
-    char current_header_key[W3C_KEY_LENGTH];
-    res = bpf_probe_read(current_header_key, sizeof(current_header_key), map_value->keys[i].str);
-    if (res < 0) {
-        return;
-    }
-    
-    if (!bpf_memcmp(current_header_key, "traceparent", W3C_KEY_LENGTH) && 
-        !bpf_memcmp(current_header_key, "Traceparent", W3C_KEY_LENGTH)) {
-        return;
-    }
-    
-    void *traceparent_header_value_ptr = map_value->values[i].array;
-    struct go_string traceparent_header_value_go_str;
-    res = bpf_probe_read(&traceparent_header_value_go_str, sizeof(traceparent_header_value_go_str), traceparent_header_value_ptr);
-    if (res < 0 || traceparent_header_value_go_str.len != W3C_VAL_LENGTH) {
-        return;
-    }
-    
-    char traceparent_header_value[W3C_VAL_LENGTH];
-    res = bpf_probe_read(&traceparent_header_value, sizeof(traceparent_header_value), traceparent_header_value_go_str.str);
-    if (res < 0) {
-        return;
-    }
-    
-    w3c_string_to_span_context(traceparent_header_value, extraction_data->parent_span_context);
-    extraction_data->found = true;
-}
 
 // Extracts the span context from the request headers by looking for the 'traceparent' header.
 // Fills the parent_span_context with the extracted span context.
@@ -220,14 +123,36 @@ static __always_inline long extract_context_from_req_headers_go_map(void *header
         return res;
     }
     
-    struct traceparent_extraction_data extraction_data = {
-        .parent_span_context = parent_span_context,
-        .found = false
-    };
+    // Use find_key_in_go_map to find the traceparent header
+    struct map_key_find_result result = {0};
+    res = find_key_in_go_map(headers_ptr, "traceparent", W3C_KEY_LENGTH, buckets_ptr_pos, &result);
     
-    iterate_go_map(headers_ptr, process_traceparent_entry, &extraction_data);
+    if (res < 0 || !result.found) {
+        // Try with capitalized variant as well
+        res = find_key_in_go_map(headers_ptr, "Traceparent", W3C_KEY_LENGTH, buckets_ptr_pos, &result);
+        if (res < 0 || !result.found) {
+            return -1;
+        }
+    }
     
-    return extraction_data.found ? 0 : -1;
+    // Extract the value if the key was found
+    if (result.found && result.value_ptr != NULL) {
+        go_slice_t *value_slice = (go_slice_t *)result.value_ptr;
+        if (value_slice->array == NULL || value_slice->len != W3C_VAL_LENGTH) {
+            return -1;
+        }
+        
+        char traceparent_header_value[W3C_VAL_LENGTH];
+        res = bpf_probe_read(traceparent_header_value, sizeof(traceparent_header_value), value_slice->array);
+        if (res < 0) {
+            return -1;
+        }
+        
+        w3c_string_to_span_context(traceparent_header_value, parent_span_context);
+        return 0;
+    }
+    
+    return -1;
 }
 
 static __always_inline long extract_context_from_req_headers_pre_parsed(void *key, struct span_context *parent_span_context) {
@@ -262,74 +187,12 @@ struct header_extraction_data {
     bool found;
 };
 
-// Process function for header value extraction
-static __always_inline void process_header_entry(MAP_BUCKET_TYPE(go_string_t, go_slice_t) *map_value, u64 i, void *data) {
-    struct header_extraction_data *extraction_data = (struct header_extraction_data *)data;
-    long res;
-    
-    // Check if this is the header we're looking for
-    char current_header_key[64] = {0};
-    int header_key_len = map_value->keys[i].len < 64 ? map_value->keys[i].len : 63;
-    if (header_key_len <= 0) {
-        bpf_printk("XMB2: header key length is less than 0");
-        return;
-    }
-    
-    // TODO: Review this
-    // Bound the header_key_len to avoid unbounded memory access
-    if (header_key_len > 64) {
-        header_key_len = 64;
-    }
-    
-    res = bpf_probe_read(current_header_key, header_key_len, map_value->keys[i].str);
-    if (res < 0) {
-        bpf_printk("XMB3: failed to read header key");
-        return;
-    }
-    
-    // Print debug information about the header key comparison
-    bpf_printk("XMB444: Header comparison: current_key=%s, target_key=%s, key_len=%d", 
-               current_header_key, extraction_data->header_name, header_key_len);
-    if (bpf_memicmp(current_header_key, extraction_data->header_name, header_key_len) != 0) {
-        bpf_printk("XMB4: header key does not match");
-        return;
-    }
-    
-    void *header_value_ptr = map_value->values[i].array;
-    struct go_string header_value_go_str;
-    res = bpf_probe_read(&header_value_go_str, sizeof(header_value_go_str), header_value_ptr);
-    if (res < 0 || header_value_go_str.len <= 0) {
-        bpf_printk("XMB5: header value length is less than 0");
-        return;
-    }
-    
-    int value_len = header_value_go_str.len < extraction_data->max_len ? 
-                   header_value_go_str.len : extraction_data->max_len - 1;
-    
-    res = bpf_probe_read(extraction_data->output, value_len, header_value_go_str.str);
-    if (res < 0) {
-        bpf_printk("XMB6: failed to read header value");
-        return;
-    }
-    
-    bpf_printk("XMB7: header value read successfully: name=%s, found=%d, value_len=%d", 
-               extraction_data->header_name, extraction_data->found, value_len);
-    extraction_data->output[value_len] = '\0';
-    extraction_data->found = true;
-    // Print the extraction data for debugging
-    bpf_printk("XMB8: Extraction data - header_name: %s, found: %d, max_len: %d", 
-               extraction_data->header_name, extraction_data->found, extraction_data->max_len);
-    
-    // Print the actual extracted value
-    bpf_printk("XMB9: Extracted value: %s", extraction_data->output);
-}
 
-static __always_inline void extract_header_value(void *headers_ptr, const char *header_name, char *output, int max_len) {
+static __always_inline void extract_header_value(void *headers_ptr, const char *header_name, int header_name_len, char *output) {
     if (!headers_ptr) {
         return;
     }
     
-    // TODO
     // If using swiss maps, rely on pre-parsed headers
     if (swiss_maps_used) {
         bpf_printk("XMB1: swiss maps used");
@@ -338,14 +201,47 @@ static __always_inline void extract_header_value(void *headers_ptr, const char *
         return;
     }
     
-    struct header_extraction_data extraction_data = {
-        .header_name = header_name,
-        .output = output,
-        .max_len = max_len,
-        .found = false
-    };
+    // Use find_key_in_go_map to find the header
+    struct map_key_find_result result = {0};
+    // We don't use strlen here since it's not available in BPF
+    // Instead, use a constant maximum header name length (32 bytes)
+    // The actual comparison in find_key_in_go_map will handle shorter strings properly
+    long res = find_key_in_go_map(headers_ptr, header_name, header_name_len, buckets_ptr_pos, &result);
+    // Print debug information about the map search
+    bpf_printk("XMB2: find_key_in_go_map result: %ld", res);
     
-    iterate_go_map(headers_ptr, process_header_entry, &extraction_data);
+    if (res >= 0) {
+        bpf_printk("XMB2.1: found=%d, bucket=%d, entry=%d", 
+                  result.found, result.bucket_index, result.entry_index);
+        
+        if (result.found && result.key_ptr != NULL) {
+            go_string_t *key_str = (go_string_t *)result.key_ptr;
+            bpf_printk("XMB2.2: key len=%d", key_str->len);
+        }
+    }
+
+    if (res < 0 || !result.found || result.value_ptr == NULL) {
+        bpf_printk("XMB3: header not found (%d): %s", res, header_name);
+        return;
+    }
+    
+    // Extract the value
+    go_slice_t *value_slice = (go_slice_t *)result.value_ptr;
+    if (value_slice->array == NULL || value_slice->len <= 0) {
+        bpf_printk("XMB5: header value length is less than or equal to 0");
+        return;
+    }
+    
+    int value_len = value_slice->len < HEADER_VALUE_MAX_LEN ? value_slice->len : HEADER_VALUE_MAX_LEN - 1;
+    
+    res = bpf_probe_read(output, value_len, value_slice->array);
+    if (res < 0) {
+        bpf_printk("XMB6: failed to read header value");
+        return;
+    }
+    
+    output[value_len] = '\0';
+    bpf_printk("XMB9: Extracted value for %s: %s", header_name, output);
 }
 
 static __always_inline void capture_request_headers(void *req_ptr, struct http_server_span_t *span) {
@@ -382,12 +278,21 @@ static __always_inline void capture_request_headers(void *req_ptr, struct http_s
         // Ensure null termination
         header_key[prefix_len + j] = '\0';
         
-        bpf_printk("XMB22: header_key: %s", header_key);
+        // bpf_printk("XMB23: header_key: %s", header_key);
         bpf_probe_read_str(span->headers[i].key, HEADER_KEY_MAX_LEN, header_key);
-        bpf_printk("XMB10: header_key: %s", span->headers[i].key);
-        extract_header_value(headers_ptr, req_header_name, 
-            span->headers[i].value, HEADER_VALUE_MAX_LEN);
-        bpf_printk("XMB0: Request header captured: %s=%s", span->headers[i].key, span->headers[i].value);
+        // bpf_printk("XMB10: header_key: %s", span->headers[i].key);
+        
+        // // Calculate length manually instead of using strlen
+        u32 req_header_name_len = 0;
+        for (req_header_name_len = 0; req_header_name_len < 32; req_header_name_len++) {
+            if (req_header_name[req_header_name_len] == '\0') {
+                break;
+            }
+        }
+        
+        extract_header_value(headers_ptr, req_header_name, req_header_name_len, 
+            span->headers[i].value);
+        // bpf_printk("XMB0: Request header captured: %s=%s", span->headers[i].key, span->headers[i].value);
     }
 }
 
