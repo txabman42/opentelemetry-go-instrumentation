@@ -119,7 +119,7 @@ struct
     __uint(key_size, sizeof(u32));
     __uint(value_size, sizeof(MAP_BUCKET_TYPE(go_tracer_with_scope_attributes_t, go_tracer_ptr)));
     __uint(max_entries, 1);
-} golang_mapbucket_storage_map SEC(".maps");
+} traceglobal_mapbucket_storage_map SEC(".maps");
 
 struct
 {
@@ -182,7 +182,7 @@ static __always_inline long fill_partial_tracer_id_from_tracers_map(void *tracer
         return -1;
     }
     u32 map_id = 0;
-    MAP_BUCKET_TYPE(go_tracer_id_partial_t, go_tracer_ptr) *map_bucket = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
+    MAP_BUCKET_TYPE(go_tracer_id_partial_t, go_tracer_ptr) *map_bucket = bpf_map_lookup_elem(&traceglobal_mapbucket_storage_map, &map_id);
     if (!map_bucket)
     {
         return -1;
@@ -246,7 +246,7 @@ static __always_inline long fill_tracer_id_with_schema_from_tracers_map(void *tr
         return -1;
     }
     u32 map_id = 0;
-    MAP_BUCKET_TYPE(go_tracer_with_schema_t, go_tracer_ptr) *map_bucket = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
+    MAP_BUCKET_TYPE(go_tracer_with_schema_t, go_tracer_ptr) *map_bucket = bpf_map_lookup_elem(&traceglobal_mapbucket_storage_map, &map_id);
     if (!map_bucket)
     {
         return -1;
@@ -311,7 +311,7 @@ static __always_inline long fill_tracer_id_with_scope_attributes_from_tracers_ma
         return -1;
     }
     u32 map_id = 0;
-    MAP_BUCKET_TYPE(go_tracer_with_scope_attributes_t, go_tracer_ptr) *map_bucket = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
+    MAP_BUCKET_TYPE(go_tracer_with_scope_attributes_t, go_tracer_ptr) *map_bucket = bpf_map_lookup_elem(&traceglobal_mapbucket_storage_map, &map_id);
     if (!map_bucket)
     {
         return -1;
