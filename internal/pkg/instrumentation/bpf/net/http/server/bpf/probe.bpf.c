@@ -40,8 +40,6 @@ struct uprobe_data_t
     u64 resp_ptr;
 };
 
-MAP_BUCKET_DEFINITION(go_string_t, go_slice_t)
-
 struct
 {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -57,14 +55,6 @@ struct
     __type(value, struct span_context);
     __uint(max_entries, MAX_CONCURRENT);
 } http_server_context_headers SEC(".maps");
-
-struct
-{
-    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
-    __uint(key_size, sizeof(u32));
-    __uint(value_size, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)));
-    __uint(max_entries, 1);
-} golang_mapbucket_storage_map SEC(".maps");
 
 struct
 {
@@ -107,85 +97,21 @@ static __always_inline long extract_context_from_req_headers_go_map(void *header
     {
         return res;
     }
-    u64 headers_count = 0;
-    res = bpf_probe_read(&headers_count, sizeof(headers_count), headers_ptr);
+
+    struct map_key_find_result result = {0};
+    res = find_key_in_go_map(headers_ptr, "traceparent", W3C_KEY_LENGTH, buckets_ptr_pos, &result);
+    if (res < 0 || !result.found)
+    {
+        return -1;
+    }
+    char traceparent_header_value[W3C_VAL_LENGTH];
+    res = bpf_probe_read(&traceparent_header_value, sizeof(traceparent_header_value), result.value_ptr.str);
     if (res < 0)
     {
         return res;
     }
-    if (headers_count == 0)
-    {
-        return -1;
-    }
-    unsigned char log_2_bucket_count;
-    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), headers_ptr + 9);
-    if (res < 0)
-    {
-        return -1;
-    }
-    u64 bucket_count = 1 << log_2_bucket_count;
-    void *header_buckets;
-    res = bpf_probe_read(&header_buckets, sizeof(header_buckets), (void*)(headers_ptr + buckets_ptr_pos));
-    if (res < 0)
-    {
-        return -1;
-    }
-    u32 map_id = 0;
-    MAP_BUCKET_TYPE(go_string_t, go_slice_t) *map_value = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
-    if (!map_value)
-    {
-        return -1;
-    }
-
-    for (u64 j = 0; j < MAX_BUCKETS; j++)
-    {
-        if (j >= bucket_count)
-        {
-            break;
-        }
-        res = bpf_probe_read(map_value, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)), header_buckets + (j * sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t))));
-        if (res < 0)
-        {
-            continue;
-        }
-        for (u64 i = 0; i < 8; i++)
-        {
-            if (map_value->tophash[i] == 0)
-            {
-                continue;
-            }
-            if (map_value->keys[i].len != W3C_KEY_LENGTH)
-            {
-                continue;
-            }
-            char current_header_key[W3C_KEY_LENGTH];
-            bpf_probe_read(current_header_key, sizeof(current_header_key), map_value->keys[i].str);
-            if (!bpf_memcmp(current_header_key, "traceparent", W3C_KEY_LENGTH) && !bpf_memcmp(current_header_key, "Traceparent", W3C_KEY_LENGTH))
-            {
-                continue;
-            }
-            void *traceparent_header_value_ptr = map_value->values[i].array;
-            struct go_string traceparent_header_value_go_str;
-            res = bpf_probe_read(&traceparent_header_value_go_str, sizeof(traceparent_header_value_go_str), traceparent_header_value_ptr);
-            if (res < 0)
-            {
-                return -1;
-            }
-            if (traceparent_header_value_go_str.len != W3C_VAL_LENGTH)
-            {
-                continue;
-            }
-            char traceparent_header_value[W3C_VAL_LENGTH];
-            res = bpf_probe_read(&traceparent_header_value, sizeof(traceparent_header_value), traceparent_header_value_go_str.str);
-            if (res < 0)
-            {
-                return res;
-            }
-            w3c_string_to_span_context(traceparent_header_value, parent_span_context);
-            return 0;
-        }
-    }
-    return -1;
+    w3c_string_to_span_context(traceparent_header_value, parent_span_context);
+    return 0;
 }
 
 static __always_inline long extract_context_from_req_headers_pre_parsed(void *key, struct span_context *parent_span_context) {
