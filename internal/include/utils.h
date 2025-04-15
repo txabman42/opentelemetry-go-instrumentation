@@ -32,6 +32,24 @@ static __always_inline int bpf_memicmp(const char *s1, const char *s2, s32 size)
     return 0;
 }
 
+// Case-insensitive string comparison, returns true if strings match regardless of case
+static __always_inline bool bpf_strcasecmp(const char *s1, const char *s2, s32 size)
+{
+    #pragma unroll
+    for (int i = 0; i < size; i++)
+    {
+        char c1 = s1[i];
+        char c2 = s2[i];
+        
+        if ((c1 | 0x20) != (c2 | 0x20)) // Bitwise OR with 0x20 converts uppercase to lowercase
+        {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
 static __always_inline void generate_random_bytes(unsigned char *buff, u32 size)
 {
     for (int i = 0; i < (size / 4); i++)

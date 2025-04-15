@@ -44,6 +44,122 @@ MAP_BUCKET_TYPE(key_type, value_type) { \
     void *overflow; \
 };
 
+struct map_key_find_result {
+    bool found;
+    u32 bucket_index;
+    u32 entry_index;
+    void *key_ptr;
+    go_string_t value_ptr;
+};
+
+MAP_BUCKET_DEFINITION(go_string_t, go_slice_t)
+
+struct
+{
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(key_size, sizeof(u32));
+    __uint(value_size, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)));
+    __uint(max_entries, 1);
+} golang_mapbucket_storage_map SEC(".maps");
+
+#define MAX_MAP_KEY_LENGTH 256
+#define MAX_MAP_BUCKETS 64
+
+// Generic function to search for a key in a Go map
+// Parameters:
+//   map_ptr: pointer to the go map
+//   key_to_find: string to search for
+//   key_length: length of the key to find
+//   buckets_ptr_pos: offset to the buckets pointer from map_ptr
+//   result: pointer to a map_key_find_result structure to store the result
+// Returns:
+//   0 on success, negative value on error
+static __always_inline long find_key_in_go_map(void *map_ptr, const char *key_to_find, u32 key_length, 
+                                        u64 buckets_ptr_pos, struct map_key_find_result *result)
+{
+    long res;
+    if (!map_ptr || !result) {
+        return -1;
+    }
+
+    u64 headers_count = 0;
+    res = bpf_probe_read(&headers_count, sizeof(headers_count), map_ptr);
+    if (res < 0 || headers_count == 0)
+    {
+        return -1;
+    }
+
+    unsigned char log_2_bucket_count;
+    res = bpf_probe_read(&log_2_bucket_count, sizeof(log_2_bucket_count), map_ptr + 9);
+    if (res < 0)
+    {
+        return -1;
+    }
+    
+    u64 bucket_count = 1 << log_2_bucket_count;
+    void *buckets;
+    res = bpf_probe_read(&buckets, sizeof(buckets), (void*)(map_ptr + buckets_ptr_pos));
+    if (res < 0)
+    {
+        return -1;
+    }
+    
+    u32 map_id = 0;
+    MAP_BUCKET_TYPE(go_string_t, go_slice_t) *bucket = bpf_map_lookup_elem(&golang_mapbucket_storage_map, &map_id);
+    if (!bucket)
+    {
+        return -1;
+    }
+
+    // Add a safety cap to iteration
+    for (u64 j = 0; j < MAX_MAP_BUCKETS && j < bucket_count; j++) {
+        void *bucket_addr = buckets + (j * sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)));
+        
+        // Try both read methods
+        res = bpf_probe_read(bucket, sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t)), buckets + (j * sizeof(MAP_BUCKET_TYPE(go_string_t, go_slice_t))));
+        if (res < 0)
+        {
+            continue;
+        }
+        
+        for (u64 i = 0; i < 8; i++)
+        {
+            if (bucket->tophash[i] == 0 || bucket->keys[i].len != key_length)
+            {
+                continue;
+            }
+            
+            char current_key[MAX_MAP_KEY_LENGTH];
+            res = bpf_probe_read(current_key, sizeof(current_key), bucket->keys[i].str);
+            if (res < 0) {
+                continue;
+            }
+            
+            if (!bpf_strcasecmp(current_key, key_to_find, key_length))
+            {
+                continue;
+            }
+            void *value_ptr = bucket->values[i].array;
+            
+            struct go_string value_go_str;
+            res = bpf_probe_read(&value_go_str, sizeof(value_go_str), value_ptr);
+            if (res < 0)
+            {
+                return -1;
+            }
+
+            result->found = true;
+            result->bucket_index = j;
+            result->entry_index = i;
+            result->key_ptr = bucket->keys[i].str;
+            result->value_ptr = value_go_str;
+            return 0;
+        }
+    }
+    
+    return -1;
+}
+
 struct slice_array_buff
 {
     unsigned char buff[MAX_SLICE_ARRAY_SIZE];
